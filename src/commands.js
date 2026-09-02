@@ -1,5 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
-const { GAMEMODES } = require("./config");
+const { GAMEMODES, TIER_OPTIONS } = require("./config");
+
+const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
 const commands = [
   new SlashCommandBuilder()
@@ -25,6 +27,39 @@ const commands = [
         .setDescription("Which gamemode's cooldown to clear")
         .setRequired(true)
         .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
+    ),
+
+  new SlashCommandBuilder()
+    .setName("settier")
+    .setDescription(
+      "Manually set a player's tier without going through the queue. Testers/managers/admins only."
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("username")
+        .setDescription("The player's Minecraft username")
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("gamemode")
+        .setDescription("Which gamemode")
+        .setRequired(true)
+        .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("tier")
+        .setDescription("The tier to set")
+        .setRequired(true)
+        .addChoices(...TIER_OPTIONS.map((t) => ({ name: t, value: t })))
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("region")
+        .setDescription("Region (only needed if this player is new)")
+        .setRequired(false)
+        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 ];
 

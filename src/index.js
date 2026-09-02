@@ -14,7 +14,7 @@ const {
 } = require("discord.js");
 const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS } = require("./config");
 const { joinQueue, leaveQueue, popNext, formatQueue } = require("./queue");
-const { setPlayerTier, getCooldownUntil, setCooldown, clearCooldown } = require("./firebase");
+const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown } = require("./firebase");
 
 const client = new Client({
   intents: [
@@ -222,6 +222,68 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({
       content: `Cleared <@${targetUser.id}>'s **${gamemode}** cooldown. They can queue again now.`,
     });
+  }
+
+  // /settier
+  if (interaction.isChatInputCommand() && interaction.commandName === "settier") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({
+        content: "Only testers, managers, or admins can do that.",
+        ephemeral: true,
+      });
+    }
+
+    const username = interaction.options.getString("username", true).trim();
+    const gamemode = interaction.options.getString("gamemode", true);
+    const tier = interaction.options.getString("tier", true);
+    const region = interaction.options.getString("region");
+
+    if (/[.#$\[\]]/.test(username)) {
+      return interaction.reply({
+        content: `"${username}" isn't a valid Minecraft username \u2014 it can't contain ".", "#", "$", "[", or "]".`,
+        ephemeral: true,
+      });
+    }
+
+    const existing = await getPlayer(username);
+    if (!existing && !region) {
+      return interaction.reply({
+        content: `**${username}** isn't on the site yet, so you need to also set the "region" option to add them.`,
+        ephemeral: true,
+      });
+    }
+
+    try {
+      await setPlayerTier(username, region, gamemode, tier);
+      await interaction.reply({
+        content: `Set **${username}** to **${tier}** in **${gamemode}**. The website will update automatically.`,
+      });
+
+      if (process.env.RESULTS_CHANNEL_ID) {
+        const resultsChannel = await interaction.guild.channels
+          .fetch(process.env.RESULTS_CHANNEL_ID)
+          .catch(() => null);
+        if (resultsChannel) {
+          await resultsChannel.send({
+            embeds: [
+              new EmbedBuilder()
+                .setTitle("Manual tier change")
+                .setDescription(
+                  `**${username}** set to **${tier}** in **${gamemode.toUpperCase()}**\nChanged by: <@${interaction.user.id}>`
+                )
+                .setColor(0xffd54a),
+            ],
+          });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      return interaction.reply({
+        content: "Something went wrong saving that to the database.",
+        ephemeral: true,
+      });
+    }
+    return;
   }
 
   // ---------- buttons ----------
