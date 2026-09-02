@@ -1,0 +1,16 @@
+{
+  "name": "cleantiers-bot",
+  "version": "1.0.0",
+  "description": "Discord tier-testing bot for CleanTiers",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy-commands": "node src/deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.1.0"
+  }
+}
