@@ -345,6 +345,13 @@ client.on("interactionCreate", async (interaction) => {
     const region = interaction.fields.getTextInputValue("player_region").trim().toUpperCase();
     const tier = interaction.fields.getTextInputValue("player_tier").trim().toUpperCase();
 
+    if (/[.#$\[\]]/.test(name)) {
+      return interaction.reply({
+        content: `"${name}" isn't a valid Minecraft username \u2014 it can't contain ".", "#", "$", "[", or "]". Double-check the spelling and try again.`,
+        ephemeral: true,
+      });
+    }
+
     if (!TIER_OPTIONS.includes(tier)) {
       return interaction.reply({
         content: `"${tier}" isn't a valid tier. Use one of: ${TIER_OPTIONS.join(", ")}`,
@@ -417,5 +424,19 @@ process.on("unhandledRejection", (err) => {
 process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);
 });
+
+// Render's free tier is built for web apps, not background workers. This
+// tiny server does nothing except answer "OK" so Render (and an uptime
+// pinger, if you set one up) sees the app as alive. It has no effect on
+// the actual Discord bot logic above.
+const http = require("http");
+http
+  .createServer((req, res) => res.end("CleanTiers bot is running."))
+  .listen(process.env.PORT || 3000);
+
+if (!process.env.DISCORD_TOKEN) {
+  console.error("DISCORD_TOKEN environment variable is missing.");
+  process.exit(1);
+}
 
 client.login(process.env.DISCORD_TOKEN);

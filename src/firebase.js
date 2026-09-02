@@ -2,9 +2,36 @@ const admin = require("firebase-admin");
 const path = require("path");
 require("dotenv").config();
 
-const serviceAccount = require(
-  path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
-);
+// On a cloud host there's no file to upload, so the service account JSON is
+// passed as a base64-encoded environment variable instead. Locally, it
+// falls back to reading the downloaded .json file directly.
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+  try {
+    const decoded = Buffer.from(
+      process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
+      "base64"
+    ).toString("utf8");
+    serviceAccount = JSON.parse(decoded);
+  } catch (err) {
+    console.error(
+      "FIREBASE_SERVICE_ACCOUNT_BASE64 is set but couldn't be decoded/parsed as JSON. Double-check you copied the FULL base64 output with nothing missing or added."
+    );
+    throw err;
+  }
+} else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+  serviceAccount = require(path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH));
+} else {
+  console.error(
+    "No Firebase credentials found. Set either FIREBASE_SERVICE_ACCOUNT_BASE64 (cloud hosting) or FIREBASE_SERVICE_ACCOUNT_PATH (local) as an environment variable."
+  );
+  process.exit(1);
+}
+
+if (!process.env.FIREBASE_DATABASE_URL) {
+  console.error("FIREBASE_DATABASE_URL environment variable is missing.");
+  process.exit(1);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
