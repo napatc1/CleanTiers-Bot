@@ -2,41 +2,50 @@ const admin = require("firebase-admin");
 const path = require("path");
 require("dotenv").config();
 
+console.log("[startup] firebase.js loaded, checking credentials...");
+
 // On a cloud host there's no file to upload, so the service account JSON is
 // passed as a base64-encoded environment variable instead. Locally, it
 // falls back to reading the downloaded .json file directly.
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+  console.log("[startup] found FIREBASE_SERVICE_ACCOUNT_BASE64, decoding...");
   try {
     const decoded = Buffer.from(
       process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
       "base64"
     ).toString("utf8");
     serviceAccount = JSON.parse(decoded);
+    console.log("[startup] decoded and parsed service account JSON OK, project_id:", serviceAccount.project_id);
   } catch (err) {
     console.error(
-      "FIREBASE_SERVICE_ACCOUNT_BASE64 is set but couldn't be decoded/parsed as JSON. Double-check you copied the FULL base64 output with nothing missing or added."
+      "[startup] FIREBASE_SERVICE_ACCOUNT_BASE64 is set but couldn't be decoded/parsed as JSON:", err.message
     );
     throw err;
   }
 } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+  console.log("[startup] using FIREBASE_SERVICE_ACCOUNT_PATH file instead");
   serviceAccount = require(path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH));
 } else {
   console.error(
-    "No Firebase credentials found. Set either FIREBASE_SERVICE_ACCOUNT_BASE64 (cloud hosting) or FIREBASE_SERVICE_ACCOUNT_PATH (local) as an environment variable."
+    "[startup] No Firebase credentials found. Neither FIREBASE_SERVICE_ACCOUNT_BASE64 nor FIREBASE_SERVICE_ACCOUNT_PATH is set."
   );
   process.exit(1);
 }
 
 if (!process.env.FIREBASE_DATABASE_URL) {
-  console.error("FIREBASE_DATABASE_URL environment variable is missing.");
+  console.error("[startup] FIREBASE_DATABASE_URL environment variable is missing.");
   process.exit(1);
 }
+
+console.log("[startup] initializing Firebase admin app with database:", process.env.FIREBASE_DATABASE_URL);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: process.env.FIREBASE_DATABASE_URL,
 });
+
+console.log("[startup] Firebase admin app initialized OK");
 
 const db = admin.database();
 

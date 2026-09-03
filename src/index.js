@@ -1,3 +1,4 @@
+console.log("[startup] index.js starting...");
 require("dotenv").config();
 const {
   Client,
@@ -497,8 +498,15 @@ http
   .listen(process.env.PORT || 3000);
 
 if (!process.env.DISCORD_TOKEN) {
-  console.error("DISCORD_TOKEN environment variable is missing.");
+  console.error("[startup] DISCORD_TOKEN environment variable is missing.");
   process.exit(1);
 }
 
-client.login(process.env.DISCORD_TOKEN);
+console.log("[startup] health server listening, attempting Discord login...");
+
+client
+  .login(process.env.DISCORD_TOKEN)
+  .then(() => console.log("[startup] client.login() promise resolved"))
+  .catch((err) => {
+    console.error("[startup] client.login() rejected:", err.message);
+  });
