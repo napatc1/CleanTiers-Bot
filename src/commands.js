@@ -52,18 +52,6 @@ const commands = [
     )
     .addStringOption((opt) =>
       opt
-        .setName("username")
-        .setDescription("The player's Minecraft username (skip this if using the 'player' option)")
-        .setRequired(false)
-    )
-    .addUserOption((opt) =>
-      opt
-        .setName("player")
-        .setDescription("Ping a verified player instead of typing their username")
-        .setRequired(false)
-    )
-    .addStringOption((opt) =>
-      opt
         .setName("gamemode")
         .setDescription("Which gamemode")
         .setRequired(true)
@@ -75,6 +63,18 @@ const commands = [
         .setDescription("The tier to set")
         .setRequired(true)
         .addChoices(...TIER_OPTIONS.map((t) => ({ name: t, value: t })))
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("username")
+        .setDescription("The player's Minecraft username (skip this if using the 'player' option)")
+        .setRequired(false)
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("player")
+        .setDescription("Ping a verified player instead of typing their username")
+        .setRequired(false)
     )
     .addStringOption((opt) =>
       opt
