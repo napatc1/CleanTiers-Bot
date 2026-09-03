@@ -53,8 +53,14 @@ const commands = [
     .addStringOption((opt) =>
       opt
         .setName("username")
-        .setDescription("The player's Minecraft username")
-        .setRequired(true)
+        .setDescription("The player's Minecraft username (skip this if using the 'player' option)")
+        .setRequired(false)
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("player")
+        .setDescription("Ping a verified player instead of typing their username")
+        .setRequired(false)
     )
     .addStringOption((opt) =>
       opt

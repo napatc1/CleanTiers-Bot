@@ -306,10 +306,31 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    const username = interaction.options.getString("username", true).trim();
+    const typedUsername = interaction.options.getString("username");
+    const pingedPlayer = interaction.options.getUser("player");
     const gamemode = interaction.options.getString("gamemode", true);
     const tier = interaction.options.getString("tier", true);
     const region = interaction.options.getString("region");
+
+    if (!typedUsername && !pingedPlayer) {
+      return interaction.reply({
+        content: "Give either a \"username\" or a \"player\" ping.",
+        ephemeral: true,
+      });
+    }
+
+    let username;
+    if (typedUsername) {
+      username = typedUsername.trim();
+    } else {
+      username = await getVerifiedUsername(pingedPlayer.id);
+      if (!username) {
+        return interaction.reply({
+          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet \u2014 have them run \`/verify\` first, or type the "username" option manually instead.`,
+          ephemeral: true,
+        });
+      }
+    }
 
     if (/[.#$\[\]]/.test(username)) {
       return interaction.reply({
