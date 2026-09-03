@@ -11,6 +11,22 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("verify")
+    .setDescription("Link your Discord account to your Minecraft username.")
+    .addStringOption((opt) =>
+      opt
+        .setName("username")
+        .setDescription("Your Minecraft username")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("posthighqueue")
+    .setDescription(
+      "Post a HIGH tier-test queue (LT3 and above only) in this channel."
+    ),
+
+  new SlashCommandBuilder()
     .setName("clearcooldown")
     .setDescription(
       "Clear a player's tier-test cooldown so they can queue again early. Testers/managers/admins only."

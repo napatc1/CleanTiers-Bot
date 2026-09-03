@@ -88,6 +88,17 @@ async function clearCooldown(gamemode, discordUserId) {
   await db.ref(`cooldowns/${gamemode}/${discordUserId}`).remove();
 }
 
+// Links a Discord account to a Minecraft username so the bot can look up
+// someone's current tiers without asking them to retype it every time.
+async function setVerifiedUsername(discordUserId, mcUsername) {
+  await db.ref(`verified/${discordUserId}`).set(mcUsername);
+}
+
+async function getVerifiedUsername(discordUserId) {
+  const snapshot = await db.ref(`verified/${discordUserId}`).once("value");
+  return snapshot.val(); // string, or null if never verified
+}
+
 module.exports = {
   db,
   setPlayerTier,
@@ -95,4 +106,6 @@ module.exports = {
   getCooldownUntil,
   setCooldown,
   clearCooldown,
+  setVerifiedUsername,
+  getVerifiedUsername,
 };
