@@ -19,6 +19,7 @@ const {
   leaveQueue,
   popNext,
   formatQueue,
+  getQueue,
   isQueueClosed,
   setQueueClosed,
   setActiveTesting,
@@ -92,19 +93,23 @@ function getRolePing(guild, gamemode) {
   return role ? `<@&${role.id}> ` : "";
 }
 
-function currentlyTestingLine(queueKey) {
+function activeTestersBlock(queueKey) {
   const active = getActiveTesting(queueKey);
   if (!active) return "";
-  return `**Currently testing:** <@${active.testerId}> \u2192 <@${active.testeeId}>\n\n`;
+  const testersList = active.testerIds
+    .map((id, i) => `${i + 1}. <@${id}>`)
+    .join("\n");
+  return `**Active Testers:**\n${testersList}\n**Testing:** <@${active.testeeId}>\n\n`;
 }
 
 function buildQueueEmbed(channelId, gamemode) {
   const closed = isQueueClosed(channelId);
+  const count = getQueue(channelId).length;
   return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
+    .setTitle(`${gamemode.toUpperCase()} Queue (${count})${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
       (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
-        currentlyTestingLine(channelId) +
+        activeTestersBlock(channelId) +
         formatQueue(channelId)
     )
     .setColor(closed ? 0x555555 : 0xffd54a);
@@ -112,11 +117,12 @@ function buildQueueEmbed(channelId, gamemode) {
 
 function buildHighQueueEmbed(highKey, gamemode) {
   const closed = isQueueClosed(highKey);
+  const count = getQueue(highKey).length;
   return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} HIGH Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
+    .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
       (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
-        currentlyTestingLine(highKey) +
+        activeTestersBlock(highKey) +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${formatQueue(highKey)}`
     )
     .setColor(closed ? 0x555555 : 0xff8a3d);
@@ -142,8 +148,12 @@ function buildQueueButtons(channelId) {
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId("queue_toggle_close")
-      .setLabel(closed ? "Reopen Queue" : "Close Queue")
-      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Danger)
+      .setLabel(closed ? "Unlock Queue" : "Lock Queue")
+      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("queue_delete")
+      .setLabel("Close Queue")
+      .setStyle(ButtonStyle.Danger)
   );
 }
 
@@ -165,8 +175,12 @@ function buildHighQueueButtons(highKey) {
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId("highqueue_toggle_close")
-      .setLabel(closed ? "Reopen Queue" : "Close Queue")
-      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Danger)
+      .setLabel(closed ? "Unlock Queue" : "Lock Queue")
+      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("highqueue_delete")
+      .setLabel("Close Queue")
+      .setStyle(ButtonStyle.Danger)
   );
 }
 
@@ -313,7 +327,8 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: true,
       });
     }
-    await interaction.reply({
+    await interaction.reply({ content: "Queue posted below.", ephemeral: true });
+    await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
       embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
       components: [buildQueueButtons(interaction.channelId)],
@@ -361,7 +376,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    if (active.testerId === interaction.user.id) {
+    if (active.testerIds.includes(interaction.user.id)) {
       return interaction.reply({ content: "You're already testing this one.", ephemeral: true });
     }
 
@@ -372,9 +387,30 @@ client.on("interactionCreate", async (interaction) => {
         SendMessages: true,
         ReadMessageHistory: true,
       });
+      active.testerIds.push(interaction.user.id);
       await ticketChannel.send({
         content: `<@${interaction.user.id}> joined this test as a second tester.`,
       });
+
+      // Refresh the queue message so the Active Testers list updates there too.
+      try {
+        const queueChannel = await interaction.guild.channels.fetch(active.queueChannelId);
+        const queueMessage = await queueChannel.messages.fetch(active.queueMessageId);
+        if (active.isHigh) {
+          await queueMessage.edit({
+            embeds: [buildHighQueueEmbed(`${active.queueChannelId}:high`, active.gamemode)],
+            components: [buildHighQueueButtons(`${active.queueChannelId}:high`)],
+          });
+        } else {
+          await queueMessage.edit({
+            embeds: [buildQueueEmbed(active.queueChannelId, active.gamemode)],
+            components: [buildQueueButtons(active.queueChannelId)],
+          });
+        }
+      } catch (err) {
+        console.error("Couldn't refresh queue message after jointesting:", err.message);
+      }
+
       return interaction.reply({
         content: `Joined the test in progress: ${ticketChannel}`,
         ephemeral: true,
@@ -398,7 +434,8 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
     const highKey = `${interaction.channelId}:high`;
-    await interaction.reply({
+    await interaction.reply({ content: "High queue posted below.", ephemeral: true });
+    await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
       embeds: [buildHighQueueEmbed(highKey, gamemode)],
       components: [buildHighQueueButtons(highKey)],
@@ -600,15 +637,24 @@ client.on("interactionCreate", async (interaction) => {
       setQueueClosed(interaction.channelId, nowClosed);
       await refreshQueueMessage(interaction, gamemode);
       if (!nowClosed) {
-        // Reopening: ping publicly since the confirmation below is ephemeral.
+        // Unlocking: ping publicly since the confirmation below is ephemeral.
         await interaction.channel.send({
           content: `${getRolePing(interaction.guild, gamemode)}Queue is open again!`,
         });
       }
       return interaction.reply({
-        content: nowClosed ? "Queue closed to new joins." : "Queue reopened.",
+        content: nowClosed ? "Queue locked to new joins." : "Queue unlocked.",
         ephemeral: true,
       });
+    }
+
+    if (interaction.customId === "queue_delete") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+      }
+      await interaction.reply({ content: "Closing this queue.", ephemeral: true });
+      await interaction.message.delete().catch(() => {});
+      return;
     }
 
     if (interaction.customId === "queue_next") {
@@ -632,7 +678,7 @@ client.on("interactionCreate", async (interaction) => {
         );
         setActiveTesting(interaction.channelId, {
           ticketChannelId: ticketChannel.id,
-          testerId: interaction.member.id,
+          testerIds: [interaction.member.id],
           testeeId: nextUserId,
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
@@ -714,9 +760,18 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
       return interaction.reply({
-        content: nowClosed ? "High queue closed to new joins." : "High queue reopened.",
+        content: nowClosed ? "High queue locked to new joins." : "High queue unlocked.",
         ephemeral: true,
       });
+    }
+
+    if (interaction.customId === "highqueue_delete") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+      }
+      await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
+      await interaction.message.delete().catch(() => {});
+      return;
     }
 
     if (interaction.customId === "highqueue_next") {
@@ -741,7 +796,7 @@ client.on("interactionCreate", async (interaction) => {
         );
         setActiveTesting(highKey, {
           ticketChannelId: ticketChannel.id,
-          testerId: interaction.member.id,
+          testerIds: [interaction.member.id],
           testeeId: nextUserId,
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
