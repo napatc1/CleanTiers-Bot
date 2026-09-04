@@ -13,8 +13,19 @@ const {
   PermissionsBitField,
   ChannelType,
 } = require("discord.js");
-const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS } = require("./config");
-const { joinQueue, leaveQueue, popNext, formatQueue, isQueueClosed, setQueueClosed } = require("./queue");
+const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_NAMES } = require("./config");
+const {
+  joinQueue,
+  leaveQueue,
+  popNext,
+  formatQueue,
+  isQueueClosed,
+  setQueueClosed,
+  setActiveTesting,
+  getActiveTesting,
+  clearActiveTestingByTicket,
+  getActiveTestingByTicket,
+} = require("./queue");
 const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername } = require("./firebase");
 
 const client = new Client({
@@ -72,11 +83,30 @@ function getTesterRoles(guild) {
 // worse, can't join.
 const HIGH_QUEUE_MAX_INDEX = TIER_OPTIONS.indexOf("LT3");
 
+// Finds the configured role for a gamemode and returns a pingable mention
+// string, or empty string if the role isn't found/configured.
+function getRolePing(guild, gamemode) {
+  const roleName = ROLE_PING_NAMES[gamemode];
+  if (!roleName) return "";
+  const role = guild.roles.cache.find((r) => r.name === roleName);
+  return role ? `<@&${role.id}> ` : "";
+}
+
+function currentlyTestingLine(queueKey) {
+  const active = getActiveTesting(queueKey);
+  if (!active) return "";
+  return `**Currently testing:** <@${active.testerId}> \u2192 <@${active.testeeId}>\n\n`;
+}
+
 function buildQueueEmbed(channelId, gamemode) {
   const closed = isQueueClosed(channelId);
   return new EmbedBuilder()
     .setTitle(`${gamemode.toUpperCase()} Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
-    .setDescription((closed ? "_Queue is closed. No new joins right now._\n\n" : "") + formatQueue(channelId))
+    .setDescription(
+      (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+        currentlyTestingLine(channelId) +
+        formatQueue(channelId)
+    )
     .setColor(closed ? 0x555555 : 0xffd54a);
 }
 
@@ -86,6 +116,7 @@ function buildHighQueueEmbed(highKey, gamemode) {
     .setTitle(`${gamemode.toUpperCase()} HIGH Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
       (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+        currentlyTestingLine(highKey) +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${formatQueue(highKey)}`
     )
     .setColor(closed ? 0x555555 : 0xff8a3d);
@@ -165,6 +196,32 @@ async function refreshHighQueueMessage(interaction, gamemode) {
     embeds: [buildHighQueueEmbed(highKey, gamemode)],
     components: [buildHighQueueButtons(highKey)],
   });
+}
+
+// Called when a ticket closes (result submitted or cancelled). Clears the
+// "currently testing" state and refreshes the original queue message so it
+// stops showing this session.
+async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
+  const info = clearActiveTestingByTicket(ticketChannelId);
+  if (!info) return;
+  try {
+    const queueChannel = await guild.channels.fetch(info.queueChannelId);
+    const queueMessage = await queueChannel.messages.fetch(info.queueMessageId);
+    if (info.isHigh) {
+      const highKey = `${info.queueChannelId}:high`;
+      await queueMessage.edit({
+        embeds: [buildHighQueueEmbed(highKey, info.gamemode)],
+        components: [buildHighQueueButtons(highKey)],
+      });
+    } else {
+      await queueMessage.edit({
+        embeds: [buildQueueEmbed(info.queueChannelId, info.gamemode)],
+        components: [buildQueueButtons(info.queueChannelId)],
+      });
+    }
+  } catch (err) {
+    console.error("Couldn't refresh queue message after ticket closed:", err.message);
+  }
 }
 
 // Sanitizes a name into something valid for a Discord channel name.
@@ -257,6 +314,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
     await interaction.reply({
+      content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
       embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
       components: [buildQueueButtons(interaction.channelId)],
     });
@@ -284,30 +342,50 @@ client.on("interactionCreate", async (interaction) => {
     if (!isTester(interaction.member)) {
       return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
     }
-    if (!interaction.channel.name.startsWith("ticket-")) {
+    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
+    if (!gamemode) {
       return interaction.reply({
-        content: "Run this inside the ticket channel you want to join, not here.",
+        content: "Run this in a tiertest queue channel, not here.",
         ephemeral: true,
       });
     }
 
+    // Check the normal queue first, then the high queue for this channel.
+    const highKey = `${interaction.channelId}:high`;
+    const active = getActiveTesting(interaction.channelId) || getActiveTesting(highKey);
+
+    if (!active) {
+      return interaction.reply({
+        content: `No test is currently in progress for **${gamemode}**.`,
+        ephemeral: true,
+      });
+    }
+
+    if (active.testerId === interaction.user.id) {
+      return interaction.reply({ content: "You're already testing this one.", ephemeral: true });
+    }
+
     try {
-      await interaction.channel.permissionOverwrites.edit(interaction.user.id, {
+      const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
+      await ticketChannel.permissionOverwrites.edit(interaction.user.id, {
         ViewChannel: true,
         SendMessages: true,
         ReadMessageHistory: true,
       });
-      await interaction.reply({
+      await ticketChannel.send({
         content: `<@${interaction.user.id}> joined this test as a second tester.`,
+      });
+      return interaction.reply({
+        content: `Joined the test in progress: ${ticketChannel}`,
+        ephemeral: true,
       });
     } catch (err) {
       console.error(err);
       return interaction.reply({
-        content: "Couldn't add you to this ticket. Make sure the bot has \"Manage Channels\" permission.",
+        content: "Couldn't add you to that ticket. Make sure the bot has \"Manage Channels\" permission.",
         ephemeral: true,
       });
     }
-    return;
   }
 
   // /posthighqueue
@@ -321,6 +399,7 @@ client.on("interactionCreate", async (interaction) => {
     }
     const highKey = `${interaction.channelId}:high`;
     await interaction.reply({
+      content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
       embeds: [buildHighQueueEmbed(highKey, gamemode)],
       components: [buildHighQueueButtons(highKey)],
     });
@@ -476,6 +555,7 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
       await interaction.reply({ content: "Closing ticket without saving a result..." });
+      await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
       setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
       return;
     }
@@ -519,6 +599,12 @@ client.on("interactionCreate", async (interaction) => {
       const nowClosed = !isQueueClosed(interaction.channelId);
       setQueueClosed(interaction.channelId, nowClosed);
       await refreshQueueMessage(interaction, gamemode);
+      if (!nowClosed) {
+        // Reopening: ping publicly since the confirmation below is ephemeral.
+        await interaction.channel.send({
+          content: `${getRolePing(interaction.guild, gamemode)}Queue is open again!`,
+        });
+      }
       return interaction.reply({
         content: nowClosed ? "Queue closed to new joins." : "Queue reopened.",
         ephemeral: true,
@@ -530,9 +616,9 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
       const nextUserId = popNext(interaction.channelId);
-      await refreshQueueMessage(interaction, gamemode);
 
       if (!nextUserId) {
+        await refreshQueueMessage(interaction, gamemode);
         return interaction.reply({ content: "Queue is empty.", ephemeral: true });
       }
 
@@ -544,12 +630,23 @@ client.on("interactionCreate", async (interaction) => {
           interaction.member,
           nextUserId
         );
+        setActiveTesting(interaction.channelId, {
+          ticketChannelId: ticketChannel.id,
+          testerId: interaction.member.id,
+          testeeId: nextUserId,
+          queueChannelId: interaction.channelId,
+          queueMessageId: interaction.message.id,
+          gamemode,
+          isHigh: false,
+        });
+        await refreshQueueMessage(interaction, gamemode);
         return interaction.reply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
           ephemeral: true,
         });
       } catch (err) {
         console.error(err);
+        await refreshQueueMessage(interaction, gamemode);
         return interaction.reply({
           content:
             "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
@@ -611,6 +708,11 @@ client.on("interactionCreate", async (interaction) => {
       const nowClosed = !isQueueClosed(highKey);
       setQueueClosed(highKey, nowClosed);
       await refreshHighQueueMessage(interaction, gamemode);
+      if (!nowClosed) {
+        await interaction.channel.send({
+          content: `${getRolePing(interaction.guild, gamemode)}High queue is open again!`,
+        });
+      }
       return interaction.reply({
         content: nowClosed ? "High queue closed to new joins." : "High queue reopened.",
         ephemeral: true,
@@ -623,9 +725,9 @@ client.on("interactionCreate", async (interaction) => {
       }
       const highKey = `${interaction.channelId}:high`;
       const nextUserId = popNext(highKey);
-      await refreshHighQueueMessage(interaction, gamemode);
 
       if (!nextUserId) {
+        await refreshHighQueueMessage(interaction, gamemode);
         return interaction.reply({ content: "High queue is empty.", ephemeral: true });
       }
 
@@ -637,12 +739,23 @@ client.on("interactionCreate", async (interaction) => {
           interaction.member,
           nextUserId
         );
+        setActiveTesting(highKey, {
+          ticketChannelId: ticketChannel.id,
+          testerId: interaction.member.id,
+          testeeId: nextUserId,
+          queueChannelId: interaction.channelId,
+          queueMessageId: interaction.message.id,
+          gamemode,
+          isHigh: true,
+        });
+        await refreshHighQueueMessage(interaction, gamemode);
         return interaction.reply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
           ephemeral: true,
         });
       } catch (err) {
         console.error(err);
+        await refreshHighQueueMessage(interaction, gamemode);
         return interaction.reply({
           content:
             "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
@@ -710,6 +823,7 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
+      await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
       setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
     } catch (err) {
       console.error(err);

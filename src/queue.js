@@ -10,6 +10,37 @@ function getQueue(channelId) {
   return queues.get(channelId);
 }
 
+// Tracks the current in-progress test per queue key, so the queue message
+// can show "Currently testing" and /jointesting knows which ticket to add
+// a second tester to. Cleared when the ticket closes.
+const activeTesting = new Map(); // queueKey -> { ticketChannelId, testerId, testeeId, queueChannelId, queueMessageId, gamemode, isHigh }
+const ticketToQueueKey = new Map(); // ticketChannelId -> queueKey
+
+function setActiveTesting(queueKey, info) {
+  activeTesting.set(queueKey, info);
+  ticketToQueueKey.set(info.ticketChannelId, queueKey);
+}
+
+function getActiveTesting(queueKey) {
+  return activeTesting.get(queueKey) || null;
+}
+
+// Call when a ticket closes. Returns the removed record (or null) so the
+// caller can go refresh that queue's message.
+function clearActiveTestingByTicket(ticketChannelId) {
+  const queueKey = ticketToQueueKey.get(ticketChannelId);
+  if (!queueKey) return null;
+  const info = activeTesting.get(queueKey) || null;
+  activeTesting.delete(queueKey);
+  ticketToQueueKey.delete(ticketChannelId);
+  return info;
+}
+
+function getActiveTestingByTicket(ticketChannelId) {
+  const queueKey = ticketToQueueKey.get(ticketChannelId);
+  return queueKey ? activeTesting.get(queueKey) : null;
+}
+
 function isQueueClosed(key) {
   return closedQueues.has(key);
 }
@@ -54,4 +85,8 @@ module.exports = {
   getQueue,
   isQueueClosed,
   setQueueClosed,
+  setActiveTesting,
+  getActiveTesting,
+  clearActiveTestingByTicket,
+  getActiveTestingByTicket,
 };
