@@ -13,7 +13,7 @@ const {
   PermissionsBitField,
   ChannelType,
 } = require("discord.js");
-const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_NAMES } = require("./config");
+const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_IDS } = require("./config");
 const {
   joinQueue,
   leaveQueue,
@@ -83,12 +83,12 @@ function getTesterRoles(guild) {
 // worse, can't join.
 const HIGH_QUEUE_MAX_INDEX = TIER_OPTIONS.indexOf("LT3");
 
-// Finds the configured role for a gamemode and returns a pingable mention
-// string, or empty string if the role isn't found/configured.
+// Finds the configured role for a gamemode by ID and returns a pingable
+// mention string, or empty string if not configured/found.
 function getRolePing(guild, gamemode) {
-  const roleName = ROLE_PING_NAMES[gamemode];
-  if (!roleName) return "";
-  const role = guild.roles.cache.find((r) => r.name === roleName);
+  const roleId = ROLE_PING_IDS[gamemode];
+  if (!roleId) return "";
+  const role = guild.roles.cache.get(roleId);
   return role ? `<@&${role.id}> ` : "";
 }
 
