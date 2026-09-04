@@ -17,6 +17,20 @@ const GAMEMODES = [
   "vanilla", "axe", "sword", "mace", "nethop", "pot", "smp", "uhc", "cart",
 ];
 
+// Exact name of the Discord role to ping when a queue opens for each
+// gamemode. Edit these to match your actual role names exactly.
+const ROLE_PING_NAMES = {
+  vanilla: "Crystal",
+  axe: "Axe",
+  sword: "Sword",
+  mace: "Mace",
+  nethop: "NethOP",
+  pot: "Pot",
+  smp: "SMP",
+  uhc: "UHC",
+  cart: "Cart",
+};
+
 // Tiers a tester can assign, best to worst. Matches tiers.js on the website.
 const TIER_OPTIONS = [
   "HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5",
@@ -26,4 +40,4 @@ const TIER_OPTIONS = [
 // again for the same gamemode.
 const COOLDOWN_DAYS = 3;
 
-module.exports = { GAMEMODE_CHANNELS, GAMEMODES, TIER_OPTIONS, COOLDOWN_DAYS };
+module.exports = { GAMEMODE_CHANNELS, GAMEMODES, ROLE_PING_NAMES, TIER_OPTIONS, COOLDOWN_DAYS };
