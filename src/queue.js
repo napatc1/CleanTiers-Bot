@@ -50,6 +50,37 @@ function setQueueClosed(key, closed) {
   else closedQueues.delete(key);
 }
 
+// Tracks which testers are "manning" a queue right now — set as soon as
+// /postqueue is run (by whoever ran it) or someone runs /jointesting.
+// When "Next" pulls someone, every tester in this set gets access to the
+// resulting ticket automatically, not just whoever clicked the button.
+const queueTesters = new Map(); // queueKey -> Set of userIds
+
+function addQueueTester(queueKey, userId) {
+  if (!queueTesters.has(queueKey)) queueTesters.set(queueKey, new Set());
+  const set = queueTesters.get(queueKey);
+  if (set.has(userId)) return false; // already a tester here
+  set.add(userId);
+  return true;
+}
+
+function getQueueTesters(queueKey) {
+  return Array.from(queueTesters.get(queueKey) || []);
+}
+
+// Tracks the message ID of the currently-posted queue embed for each queue
+// key, so commands like /jointesting (which aren't a click on that message)
+// can still find and refresh it.
+const queueMessages = new Map(); // queueKey -> { channelId, messageId }
+
+function setQueueMessage(queueKey, channelId, messageId) {
+  queueMessages.set(queueKey, { channelId, messageId });
+}
+
+function getQueueMessage(queueKey) {
+  return queueMessages.get(queueKey) || null;
+}
+
 function joinQueue(channelId, userId) {
   const queue = getQueue(channelId);
   if (queue.includes(userId)) return false; // already in queue
@@ -89,4 +120,8 @@ module.exports = {
   getActiveTesting,
   clearActiveTestingByTicket,
   getActiveTestingByTicket,
+  addQueueTester,
+  getQueueTesters,
+  setQueueMessage,
+  getQueueMessage,
 };

@@ -26,6 +26,10 @@ const {
   getActiveTesting,
   clearActiveTestingByTicket,
   getActiveTestingByTicket,
+  addQueueTester,
+  getQueueTesters,
+  setQueueMessage,
+  getQueueMessage,
 } = require("./queue");
 const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername } = require("./firebase");
 
@@ -94,12 +98,17 @@ function getRolePing(guild, gamemode) {
 }
 
 function activeTestersBlock(queueKey) {
+  const testers = getQueueTesters(queueKey);
   const active = getActiveTesting(queueKey);
-  if (!active) return "";
-  const testersList = active.testerIds
-    .map((id, i) => `${i + 1}. <@${id}>`)
-    .join("\n");
-  return `**Active Testers:**\n${testersList}\n**Testing:** <@${active.testeeId}>\n\n`;
+
+  let block = "";
+  if (active) {
+    block += `**Testing:** <@${active.testeeId}>\n`;
+  }
+  if (testers.length > 0) {
+    block += `**Active Testers:**\n${testers.map((id, i) => `${i + 1}. <@${id}>`).join("\n")}\n`;
+  }
+  return block ? block + "\n" : "";
 }
 
 function buildQueueEmbed(channelId, gamemode) {
@@ -327,12 +336,14 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: true,
       });
     }
+    addQueueTester(interaction.channelId, interaction.user.id);
     await interaction.reply({ content: "Queue posted below.", ephemeral: true });
-    await interaction.channel.send({
+    const queueMsg = await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
       embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
       components: [buildQueueButtons(interaction.channelId)],
     });
+    setQueueMessage(interaction.channelId, interaction.channelId, queueMsg.id);
     return;
   }
 
@@ -365,63 +376,53 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Check the normal queue first, then the high queue for this channel.
-    const highKey = `${interaction.channelId}:high`;
-    const active = getActiveTesting(interaction.channelId) || getActiveTesting(highKey);
-
-    if (!active) {
+    const added = addQueueTester(interaction.channelId, interaction.user.id);
+    if (!added) {
       return interaction.reply({
-        content: `No test is currently in progress for **${gamemode}**.`,
+        content: `You're already testing **${gamemode}**.`,
         ephemeral: true,
       });
     }
 
-    if (active.testerIds.includes(interaction.user.id)) {
-      return interaction.reply({ content: "You're already testing this one.", ephemeral: true });
-    }
-
-    try {
-      const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
-      await ticketChannel.permissionOverwrites.edit(interaction.user.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-      });
-      active.testerIds.push(interaction.user.id);
-      await ticketChannel.send({
-        content: `<@${interaction.user.id}> joined this test as a second tester.`,
-      });
-
-      // Refresh the queue message so the Active Testers list updates there too.
+    // If a test is already in progress, add this tester to that ticket too
+    // so they don't have to wait for the next pull.
+    const active = getActiveTesting(interaction.channelId);
+    if (active && !active.testerIds.includes(interaction.user.id)) {
       try {
-        const queueChannel = await interaction.guild.channels.fetch(active.queueChannelId);
-        const queueMessage = await queueChannel.messages.fetch(active.queueMessageId);
-        if (active.isHigh) {
-          await queueMessage.edit({
-            embeds: [buildHighQueueEmbed(`${active.queueChannelId}:high`, active.gamemode)],
-            components: [buildHighQueueButtons(`${active.queueChannelId}:high`)],
-          });
-        } else {
-          await queueMessage.edit({
-            embeds: [buildQueueEmbed(active.queueChannelId, active.gamemode)],
-            components: [buildQueueButtons(active.queueChannelId)],
-          });
-        }
+        const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
+        await ticketChannel.permissionOverwrites.edit(interaction.user.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+        });
+        active.testerIds.push(interaction.user.id);
+        await ticketChannel.send({
+          content: `<@${interaction.user.id}> joined this test as a second tester.`,
+        });
       } catch (err) {
-        console.error("Couldn't refresh queue message after jointesting:", err.message);
+        console.error("Couldn't add jointesting tester to active ticket:", err.message);
       }
-
-      return interaction.reply({
-        content: `Joined the test in progress: ${ticketChannel}`,
-        ephemeral: true,
-      });
-    } catch (err) {
-      console.error(err);
-      return interaction.reply({
-        content: "Couldn't add you to that ticket. Make sure the bot has \"Manage Channels\" permission.",
-        ephemeral: true,
-      });
     }
+
+    // Refresh the queue message so the Active Testers list shows the new tester.
+    try {
+      const stored = getQueueMessage(interaction.channelId);
+      if (stored) {
+        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
+        const queueMessage = await queueChannel.messages.fetch(stored.messageId);
+        await queueMessage.edit({
+          embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
+          components: [buildQueueButtons(interaction.channelId)],
+        });
+      }
+    } catch (err) {
+      console.error("Couldn't refresh queue message after jointesting:", err.message);
+    }
+
+    return interaction.reply({
+      content: `You're now testing **${gamemode}** alongside the other tester(s).`,
+      ephemeral: true,
+    });
   }
 
   // /posthighqueue
@@ -434,12 +435,14 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
     const highKey = `${interaction.channelId}:high`;
+    addQueueTester(highKey, interaction.user.id);
     await interaction.reply({ content: "High queue posted below.", ephemeral: true });
-    await interaction.channel.send({
+    const highQueueMsg = await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
       embeds: [buildHighQueueEmbed(highKey, gamemode)],
       components: [buildHighQueueButtons(highKey)],
     });
+    setQueueMessage(highKey, interaction.channelId, highQueueMsg.id);
     return;
   }
 
@@ -661,6 +664,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      addQueueTester(interaction.channelId, interaction.member.id);
       const nextUserId = popNext(interaction.channelId);
 
       if (!nextUserId) {
@@ -678,7 +682,7 @@ client.on("interactionCreate", async (interaction) => {
         );
         setActiveTesting(interaction.channelId, {
           ticketChannelId: ticketChannel.id,
-          testerIds: [interaction.member.id],
+          testerIds: getQueueTesters(interaction.channelId),
           testeeId: nextUserId,
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
@@ -779,6 +783,7 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
       const highKey = `${interaction.channelId}:high`;
+      addQueueTester(highKey, interaction.member.id);
       const nextUserId = popNext(highKey);
 
       if (!nextUserId) {
@@ -796,7 +801,7 @@ client.on("interactionCreate", async (interaction) => {
         );
         setActiveTesting(highKey, {
           ticketChannelId: ticketChannel.id,
-          testerIds: [interaction.member.id],
+          testerIds: getQueueTesters(highKey),
           testeeId: nextUserId,
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
