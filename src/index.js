@@ -14,7 +14,7 @@ const {
   ChannelType,
 } = require("discord.js");
 const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS } = require("./config");
-const { joinQueue, leaveQueue, popNext, formatQueue } = require("./queue");
+const { joinQueue, leaveQueue, popNext, formatQueue, isQueueClosed, setQueueClosed } = require("./queue");
 const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername } = require("./firebase");
 
 const client = new Client({
@@ -73,29 +73,34 @@ function getTesterRoles(guild) {
 const HIGH_QUEUE_MAX_INDEX = TIER_OPTIONS.indexOf("LT3");
 
 function buildQueueEmbed(channelId, gamemode) {
+  const closed = isQueueClosed(channelId);
   return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} Tier Test Queue`)
-    .setDescription(formatQueue(channelId))
-    .setColor(0xffd54a);
+    .setTitle(`${gamemode.toUpperCase()} Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
+    .setDescription((closed ? "_Queue is closed. No new joins right now._\n\n" : "") + formatQueue(channelId))
+    .setColor(closed ? 0x555555 : 0xffd54a);
 }
 
 function buildHighQueueEmbed(highKey, gamemode) {
+  const closed = isQueueClosed(highKey);
   return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} HIGH Tier Test Queue`)
+    .setTitle(`${gamemode.toUpperCase()} HIGH Tier Test Queue${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
-      `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${formatQueue(highKey)}`
+      (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+        `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${formatQueue(highKey)}`
     )
-    .setColor(0xff8a3d);
+    .setColor(closed ? 0x555555 : 0xff8a3d);
 }
 
-// Main queue message: anyone can Join/Leave, testers can pull Next.
-// Submitting a result now happens inside the private ticket, not here.
-function buildQueueButtons() {
+// Main queue message: anyone can Join/Leave, testers can pull Next or
+// close/reopen the queue to new joins.
+function buildQueueButtons(channelId) {
+  const closed = isQueueClosed(channelId);
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("queue_join")
       .setLabel("Join Queue")
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(closed),
     new ButtonBuilder()
       .setCustomId("queue_leave")
       .setLabel("Leave Queue")
@@ -103,16 +108,22 @@ function buildQueueButtons() {
     new ButtonBuilder()
       .setCustomId("queue_next")
       .setLabel("Next (Tester)")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("queue_toggle_close")
+      .setLabel(closed ? "Reopen Queue" : "Close Queue")
+      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Danger)
   );
 }
 
-function buildHighQueueButtons() {
+function buildHighQueueButtons(highKey) {
+  const closed = isQueueClosed(highKey);
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("highqueue_join")
       .setLabel("Join High Queue")
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(closed),
     new ButtonBuilder()
       .setCustomId("highqueue_leave")
       .setLabel("Leave Queue")
@@ -120,7 +131,11 @@ function buildHighQueueButtons() {
     new ButtonBuilder()
       .setCustomId("highqueue_next")
       .setLabel("Next (Tester)")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("highqueue_toggle_close")
+      .setLabel(closed ? "Reopen Queue" : "Close Queue")
+      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Danger)
   );
 }
 
@@ -140,7 +155,7 @@ function buildTicketButtons(gamemode, testeeId) {
 async function refreshQueueMessage(interaction, gamemode) {
   await interaction.message.edit({
     embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
-    components: [buildQueueButtons()],
+    components: [buildQueueButtons(interaction.channelId)],
   });
 }
 
@@ -148,7 +163,7 @@ async function refreshHighQueueMessage(interaction, gamemode) {
   const highKey = `${interaction.channelId}:high`;
   await interaction.message.edit({
     embeds: [buildHighQueueEmbed(highKey, gamemode)],
-    components: [buildHighQueueButtons()],
+    components: [buildHighQueueButtons(highKey)],
   });
 }
 
@@ -243,7 +258,7 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.reply({
       embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
-      components: [buildQueueButtons()],
+      components: [buildQueueButtons(interaction.channelId)],
     });
     return;
   }
@@ -264,6 +279,37 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /jointesting
+  if (interaction.isChatInputCommand() && interaction.commandName === "jointesting") {
+    if (!isTester(interaction.member)) {
+      return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+    }
+    if (!interaction.channel.name.startsWith("ticket-")) {
+      return interaction.reply({
+        content: "Run this inside the ticket channel you want to join, not here.",
+        ephemeral: true,
+      });
+    }
+
+    try {
+      await interaction.channel.permissionOverwrites.edit(interaction.user.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+      });
+      await interaction.reply({
+        content: `<@${interaction.user.id}> joined this test as a second tester.`,
+      });
+    } catch (err) {
+      console.error(err);
+      return interaction.reply({
+        content: "Couldn't add you to this ticket. Make sure the bot has \"Manage Channels\" permission.",
+        ephemeral: true,
+      });
+    }
+    return;
+  }
+
   // /posthighqueue
   if (interaction.isChatInputCommand() && interaction.commandName === "posthighqueue") {
     const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
@@ -276,7 +322,7 @@ client.on("interactionCreate", async (interaction) => {
     const highKey = `${interaction.channelId}:high`;
     await interaction.reply({
       embeds: [buildHighQueueEmbed(highKey, gamemode)],
-      components: [buildHighQueueButtons()],
+      components: [buildHighQueueButtons(highKey)],
     });
     return;
   }
@@ -439,6 +485,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!gamemode) return;
 
     if (interaction.customId === "queue_join") {
+      if (isQueueClosed(interaction.channelId)) {
+        return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
+      }
       const cooldownUntil = await getCooldownUntil(gamemode, interaction.user.id);
       if (cooldownUntil && cooldownUntil > Date.now()) {
         return interaction.reply({
@@ -459,6 +508,19 @@ client.on("interactionCreate", async (interaction) => {
       await refreshQueueMessage(interaction, gamemode);
       return interaction.reply({
         content: left ? "You left the queue." : "You weren't in the queue.",
+        ephemeral: true,
+      });
+    }
+
+    if (interaction.customId === "queue_toggle_close") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+      }
+      const nowClosed = !isQueueClosed(interaction.channelId);
+      setQueueClosed(interaction.channelId, nowClosed);
+      await refreshQueueMessage(interaction, gamemode);
+      return interaction.reply({
+        content: nowClosed ? "Queue closed to new joins." : "Queue reopened.",
         ephemeral: true,
       });
     }
@@ -500,6 +562,10 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.customId === "highqueue_join") {
       const highKey = `${interaction.channelId}:high`;
 
+      if (isQueueClosed(highKey)) {
+        return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
+      }
+
       const username = await getVerifiedUsername(interaction.user.id);
       if (!username) {
         return interaction.reply({
@@ -533,6 +599,20 @@ client.on("interactionCreate", async (interaction) => {
       await refreshHighQueueMessage(interaction, gamemode);
       return interaction.reply({
         content: left ? "You left the high queue." : "You weren't in the high queue.",
+        ephemeral: true,
+      });
+    }
+
+    if (interaction.customId === "highqueue_toggle_close") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+      }
+      const highKey = `${interaction.channelId}:high`;
+      const nowClosed = !isQueueClosed(highKey);
+      setQueueClosed(highKey, nowClosed);
+      await refreshHighQueueMessage(interaction, gamemode);
+      return interaction.reply({
+        content: nowClosed ? "High queue closed to new joins." : "High queue reopened.",
         ephemeral: true,
       });
     }

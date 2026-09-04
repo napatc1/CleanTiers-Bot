@@ -21,6 +21,12 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("jointesting")
+    .setDescription(
+      "Join an already-open ticket as a second tester. Run this inside the ticket channel."
+    ),
+
+  new SlashCommandBuilder()
     .setName("posthighqueue")
     .setDescription(
       "Post a HIGH tier-test queue (LT3 and above only) in this channel."

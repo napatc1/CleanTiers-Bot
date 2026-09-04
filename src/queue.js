@@ -2,9 +2,21 @@
 // which is fine since a queue only makes sense while the bot is live anyway.
 const queues = new Map();
 
+// Tracks which queue keys are currently closed to new joins.
+const closedQueues = new Set();
+
 function getQueue(channelId) {
   if (!queues.has(channelId)) queues.set(channelId, []);
   return queues.get(channelId);
+}
+
+function isQueueClosed(key) {
+  return closedQueues.has(key);
+}
+
+function setQueueClosed(key, closed) {
+  if (closed) closedQueues.add(key);
+  else closedQueues.delete(key);
 }
 
 function joinQueue(channelId, userId) {
@@ -34,4 +46,12 @@ function formatQueue(channelId) {
   return queue.map((id, i) => `${i + 1}. <@${id}>`).join("\n");
 }
 
-module.exports = { joinQueue, leaveQueue, popNext, formatQueue, getQueue };
+module.exports = {
+  joinQueue,
+  leaveQueue,
+  popNext,
+  formatQueue,
+  getQueue,
+  isQueueClosed,
+  setQueueClosed,
+};
