@@ -27,6 +27,7 @@ const {
   clearActiveTestingByTicket,
   getActiveTestingByTicket,
   addQueueTester,
+  removeQueueTester,
   getQueueTesters,
   setQueueMessage,
   getQueueMessage,
@@ -421,6 +422,64 @@ client.on("interactionCreate", async (interaction) => {
 
     return interaction.reply({
       content: `You're now testing **${gamemode}** alongside the other tester(s).`,
+      ephemeral: true,
+    });
+  }
+
+  // /leavetesting
+  if (interaction.isChatInputCommand() && interaction.commandName === "leavetesting") {
+    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
+    if (!gamemode) {
+      return interaction.reply({
+        content: "Run this in a tiertest queue channel, not here.",
+        ephemeral: true,
+      });
+    }
+
+    const removed = removeQueueTester(interaction.channelId, interaction.user.id);
+    if (!removed) {
+      return interaction.reply({
+        content: `You're not currently testing **${gamemode}**.`,
+        ephemeral: true,
+      });
+    }
+
+    // If a test is in progress and this tester was part of it, drop them
+    // from that ticket's tester list and revoke their personal access.
+    const active = getActiveTesting(interaction.channelId);
+    if (active) {
+      const idx = active.testerIds.indexOf(interaction.user.id);
+      if (idx !== -1) {
+        active.testerIds.splice(idx, 1);
+        try {
+          const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
+          await ticketChannel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
+          await ticketChannel.send({
+            content: `<@${interaction.user.id}> stopped testing this one.`,
+          });
+        } catch (err) {
+          console.error("Couldn't remove leavetesting tester from active ticket:", err.message);
+        }
+      }
+    }
+
+    // Refresh the queue message so the Active Testers list drops this tester.
+    try {
+      const stored = getQueueMessage(interaction.channelId);
+      if (stored) {
+        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
+        const queueMessage = await queueChannel.messages.fetch(stored.messageId);
+        await queueMessage.edit({
+          embeds: [buildQueueEmbed(interaction.channelId, gamemode)],
+          components: [buildQueueButtons(interaction.channelId)],
+        });
+      }
+    } catch (err) {
+      console.error("Couldn't refresh queue message after leavetesting:", err.message);
+    }
+
+    return interaction.reply({
+      content: `You've stopped testing **${gamemode}**.`,
       ephemeral: true,
     });
   }

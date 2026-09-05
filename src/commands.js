@@ -23,7 +23,13 @@ const commands = [
   new SlashCommandBuilder()
     .setName("jointesting")
     .setDescription(
-      "Join the test currently in progress as a second tester. Run this in the queue channel."
+      "Join this queue as a tester alongside anyone already testing here. Run this in the queue channel."
+    ),
+
+  new SlashCommandBuilder()
+    .setName("leavetesting")
+    .setDescription(
+      "Stop testing this queue. Run this in the queue channel."
     ),
 
   new SlashCommandBuilder()

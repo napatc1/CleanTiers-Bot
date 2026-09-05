@@ -64,6 +64,13 @@ function addQueueTester(queueKey, userId) {
   return true;
 }
 
+function removeQueueTester(queueKey, userId) {
+  const set = queueTesters.get(queueKey);
+  if (!set || !set.has(userId)) return false; // wasn't testing here
+  set.delete(userId);
+  return true;
+}
+
 function getQueueTesters(queueKey) {
   return Array.from(queueTesters.get(queueKey) || []);
 }
@@ -121,6 +128,7 @@ module.exports = {
   clearActiveTestingByTicket,
   getActiveTestingByTicket,
   addQueueTester,
+  removeQueueTester,
   getQueueTesters,
   setQueueMessage,
   getQueueMessage,
