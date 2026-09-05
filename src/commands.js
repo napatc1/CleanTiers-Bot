@@ -33,6 +33,12 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("backfilllogs")
+    .setDescription(
+      "One-time: rebuild the website's test log from the results channel's message history. Admins/managers only."
+    ),
+
+  new SlashCommandBuilder()
     .setName("posthighqueue")
     .setDescription(
       "Post a HIGH tier-test queue (LT3 and above only) in this channel."

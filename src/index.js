@@ -32,7 +32,7 @@ const {
   setQueueMessage,
   getQueueMessage,
 } = require("./queue");
-const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername, setLiveTest, clearLiveTest, logTestResult } = require("./firebase");
+const { db, setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername, setLiveTest, clearLiveTest, logTestResult } = require("./firebase");
 
 const client = new Client({
   intents: [
@@ -495,6 +495,90 @@ client.on("interactionCreate", async (interaction) => {
       content: `You've stopped testing **${gamemode}**.`,
       ephemeral: true,
     });
+  }
+
+  // /backfilllogs
+  if (interaction.isChatInputCommand() && interaction.commandName === "backfilllogs") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({
+        content: "Only testers, managers, or admins can do that.",
+        ephemeral: true,
+      });
+    }
+    if (!process.env.RESULTS_CHANNEL_ID) {
+      return interaction.reply({
+        content: "RESULTS_CHANNEL_ID isn't set, so there's no channel to read history from.",
+        ephemeral: true,
+      });
+    }
+
+    await interaction.reply({ content: "Reading results channel history, this may take a moment...", ephemeral: true });
+
+    try {
+      const resultsChannel = await interaction.guild.channels.fetch(process.env.RESULTS_CHANNEL_ID);
+      let before = undefined;
+      let imported = 0;
+      let scanned = 0;
+      const testerNameCache = new Map();
+
+      for (let page = 0; page < 20; page++) {
+        const batch = await resultsChannel.messages.fetch({ limit: 100, before });
+        if (batch.size === 0) break;
+
+        for (const message of batch.values()) {
+          scanned++;
+          if (message.author.id !== client.user.id) continue;
+          const embed = message.embeds[0];
+          if (!embed || !embed.description) continue;
+          if (embed.title !== "Tier test result" && embed.title !== "Manual tier change") continue;
+
+          const desc = embed.description;
+          const nameMatch = desc.match(/^\*\*(.+?)\*\*/);
+          const gamemodeMatch = desc.match(/in \*\*(.+?)\*\*:/);
+          const firstLine = desc.split("\n")[0];
+          const changeText = firstLine.split(": ").slice(1).join(": ");
+          const tierMatch = changeText.split("\u2192");
+          const tier = tierMatch.length > 1 ? tierMatch[tierMatch.length - 1].trim() : null;
+          const regionMatch = desc.match(/Region: (\w+)/);
+          const testerIdMatches = [...desc.matchAll(/<@(\d+)>/g)];
+          const testerId = testerIdMatches.length ? testerIdMatches[testerIdMatches.length - 1][1] : null;
+
+          if (!nameMatch || !gamemodeMatch || !tier || !testerId) continue;
+
+          const testeeName = nameMatch[1];
+          const gamemode = gamemodeMatch[1].toLowerCase();
+
+          if (!testerNameCache.has(testerId)) {
+            testerNameCache.set(testerId, await resolveDisplayName(interaction.guild, testerId));
+          }
+          const testerName = testerNameCache.get(testerId);
+
+          await db.ref(`resultsLog/backfill-${message.id}`).set({
+            testeeName,
+            testerNames: [testerName],
+            gamemode,
+            tier,
+            region: regionMatch ? regionMatch[1] : null,
+            timestamp: message.createdTimestamp,
+          });
+          imported++;
+        }
+
+        before = batch.last().id;
+        if (batch.size < 100) break;
+      }
+
+      return interaction.followUp({
+        content: `Done. Scanned ${scanned} messages, imported ${imported} results into the log.`,
+        ephemeral: true,
+      });
+    } catch (err) {
+      console.error(err);
+      return interaction.followUp({
+        content: "Something went wrong reading the channel history. Check the bot console for details.",
+        ephemeral: true,
+      });
+    }
   }
 
   // /posthighqueue
