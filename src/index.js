@@ -820,12 +820,16 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      // Ack immediately — the Firebase/Discord lookups below can take
+      // longer than Discord's 3-second reply window.
+      await interaction.deferReply({ ephemeral: true });
+
       addQueueTester(interaction.channelId, interaction.member.id);
       const nextUserId = popNext(interaction.channelId);
 
       if (!nextUserId) {
         await refreshQueueMessage(interaction, gamemode);
-        return interaction.reply({ content: "Queue is empty.", ephemeral: true });
+        return interaction.editReply({ content: "Queue is empty." });
       }
 
       try {
@@ -858,17 +862,15 @@ client.on("interactionCreate", async (interaction) => {
         });
 
         await refreshQueueMessage(interaction, gamemode);
-        return interaction.reply({
+        return interaction.editReply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
-          ephemeral: true,
         });
       } catch (err) {
         console.error(err);
         await refreshQueueMessage(interaction, gamemode);
-        return interaction.reply({
+        return interaction.editReply({
           content:
             "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
-          ephemeral: true,
         });
       }
     }
@@ -950,13 +952,15 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
+
       const highKey = `${interaction.channelId}:high`;
       addQueueTester(highKey, interaction.member.id);
       const nextUserId = popNext(highKey);
 
       if (!nextUserId) {
         await refreshHighQueueMessage(interaction, gamemode);
-        return interaction.reply({ content: "High queue is empty.", ephemeral: true });
+        return interaction.editReply({ content: "High queue is empty." });
       }
 
       try {
@@ -989,17 +993,15 @@ client.on("interactionCreate", async (interaction) => {
         });
 
         await refreshHighQueueMessage(interaction, gamemode);
-        return interaction.reply({
+        return interaction.editReply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
-          ephemeral: true,
         });
       } catch (err) {
         console.error(err);
         await refreshHighQueueMessage(interaction, gamemode);
-        return interaction.reply({
+        return interaction.editReply({
           content:
             "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
-          ephemeral: true,
         });
       }
     }
@@ -1091,6 +1093,8 @@ client.on("interactionCreate", async (interaction) => {
    try {
      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
        await interaction.reply({ content: "Something went wrong handling that. Check the bot console for details.", ephemeral: true });
+     } else if (interaction.isRepliable() && interaction.deferred && !interaction.replied) {
+       await interaction.editReply({ content: "Something went wrong handling that. Check the bot console for details." });
      }
    } catch (_) {}
  }

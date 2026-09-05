@@ -35,7 +35,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("backfilllogs")
     .setDescription(
-      "One-time: rebuild the website's test log from the results channel's message history. Admins/managers only."
+      "One-time: rebuild the website's test log from results channel history."
     ),
 
   new SlashCommandBuilder()
