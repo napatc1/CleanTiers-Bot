@@ -32,7 +32,7 @@ const {
   setQueueMessage,
   getQueueMessage,
 } = require("./queue");
-const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername } = require("./firebase");
+const { setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername, setLiveTest, clearLiveTest, logTestResult } = require("./firebase");
 
 const client = new Client({
   intents: [
@@ -224,10 +224,12 @@ async function refreshHighQueueMessage(interaction, gamemode) {
 
 // Called when a ticket closes (result submitted or cancelled). Clears the
 // "currently testing" state and refreshes the original queue message so it
-// stops showing this session.
+// stops showing this session. Returns the removed info (or null) in case
+// the caller needs it, e.g. to log a completed result.
 async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
   const info = clearActiveTestingByTicket(ticketChannelId);
-  if (!info) return;
+  await clearLiveTest(ticketChannelId);
+  if (!info) return null;
   try {
     const queueChannel = await guild.channels.fetch(info.queueChannelId);
     const queueMessage = await queueChannel.messages.fetch(info.queueMessageId);
@@ -246,6 +248,7 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
   } catch (err) {
     console.error("Couldn't refresh queue message after ticket closed:", err.message);
   }
+  return info;
 }
 
 // Sanitizes a name into something valid for a Discord channel name.
@@ -257,6 +260,16 @@ function slugify(str) {
       .replace(/^-+|-+$/g, "")
       .slice(0, 50) || "player"
   );
+}
+
+// For the website's live/recent test displays: prefer the verified
+// Minecraft username (so mc-heads.net shows a real head), falling back to
+// their Discord username if they haven't run /verify.
+async function resolveDisplayName(guild, discordUserId) {
+  const verified = await getVerifiedUsername(discordUserId);
+  if (verified) return verified;
+  const member = await guild.members.fetch(discordUserId).catch(() => null);
+  return member ? member.user.username : discordUserId;
 }
 
 // Creates a private channel visible only to the claiming tester(s) with the
@@ -748,6 +761,18 @@ client.on("interactionCreate", async (interaction) => {
           gamemode,
           isHigh: false,
         });
+
+        const testeeName = await resolveDisplayName(interaction.guild, nextUserId);
+        const testerNames = await Promise.all(
+          getQueueTesters(interaction.channelId).map((id) => resolveDisplayName(interaction.guild, id))
+        );
+        await setLiveTest(ticketChannel.id, {
+          testeeName,
+          testerNames,
+          gamemode,
+          startedAt: Date.now(),
+        });
+
         await refreshQueueMessage(interaction, gamemode);
         return interaction.reply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
@@ -867,6 +892,18 @@ client.on("interactionCreate", async (interaction) => {
           gamemode,
           isHigh: true,
         });
+
+        const highTesteeName = await resolveDisplayName(interaction.guild, nextUserId);
+        const highTesterNames = await Promise.all(
+          getQueueTesters(highKey).map((id) => resolveDisplayName(interaction.guild, id))
+        );
+        await setLiveTest(ticketChannel.id, {
+          testeeName: highTesteeName,
+          testerNames: highTesterNames,
+          gamemode: `${gamemode} (high)`,
+          startedAt: Date.now(),
+        });
+
         await refreshHighQueueMessage(interaction, gamemode);
         return interaction.reply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
@@ -942,7 +979,20 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
-      await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
+      const closedInfo = await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
+      const testerNames = await Promise.all(
+        (closedInfo?.testerIds || [interaction.user.id]).map((id) =>
+          resolveDisplayName(interaction.guild, id)
+        )
+      );
+      await logTestResult({
+        testeeName: name,
+        testerNames,
+        gamemode,
+        tier,
+        region,
+        timestamp: Date.now(),
+      });
       setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
     } catch (err) {
       console.error(err);

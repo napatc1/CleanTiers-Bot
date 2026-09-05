@@ -99,6 +99,22 @@ async function getVerifiedUsername(discordUserId) {
   return snapshot.val(); // string, or null if never verified
 }
 
+// "Live tests" lets the website show what's happening right now. Keyed by
+// ticket channel ID so it's easy to clear when that ticket closes.
+async function setLiveTest(ticketChannelId, info) {
+  await db.ref(`liveTests/${ticketChannelId}`).set(info);
+}
+
+async function clearLiveTest(ticketChannelId) {
+  await db.ref(`liveTests/${ticketChannelId}`).remove();
+}
+
+// Permanent-ish log of completed results, so the website can show a
+// "recent tests" feed. Each entry gets its own auto-generated key.
+async function logTestResult(entry) {
+  await db.ref("resultsLog").push(entry);
+}
+
 module.exports = {
   db,
   setPlayerTier,
