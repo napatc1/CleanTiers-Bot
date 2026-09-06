@@ -124,4 +124,7 @@ module.exports = {
   clearCooldown,
   setVerifiedUsername,
   getVerifiedUsername,
+  setLiveTest,
+  clearLiveTest,
+  logTestResult,
 };

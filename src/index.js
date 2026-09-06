@@ -752,7 +752,7 @@ client.on("interactionCreate", async (interaction) => {
       }
       await interaction.reply({ content: "Closing ticket without saving a result..." });
       await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
+      setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (close):", err.message)), 3000);
       return;
     }
 
@@ -1079,7 +1079,7 @@ client.on("interactionCreate", async (interaction) => {
         region,
         timestamp: Date.now(),
       });
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+      setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
       return interaction.reply({
