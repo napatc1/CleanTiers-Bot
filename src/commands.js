@@ -8,6 +8,13 @@ const commands = [
     .setName("postqueue")
     .setDescription(
       "Post the tier-test queue message in this channel (run once per channel)."
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("region")
+        .setDescription("Which region's servers you'll be testing on")
+        .setRequired(true)
+        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 
   new SlashCommandBuilder()
@@ -18,6 +25,17 @@ const commands = [
         .setName("username")
         .setDescription("Your Minecraft username")
         .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("platform")
+        .setDescription("Your account type")
+        .setRequired(true)
+        .addChoices(
+          { name: "Bedrock", value: "bedrock" },
+          { name: "Premium", value: "premium" },
+          { name: "Cracked", value: "cracked" }
+        )
     ),
 
   new SlashCommandBuilder()
@@ -33,9 +51,22 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("backfilllogs")
+    .setDescription(
+      "One-time: rebuild the website's test log from results channel history."
+    ),
+
+  new SlashCommandBuilder()
     .setName("posthighqueue")
     .setDescription(
       "Post a HIGH tier-test queue (LT3 and above only) in this channel."
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("region")
+        .setDescription("Which region's servers you'll be testing on")
+        .setRequired(true)
+        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 
   new SlashCommandBuilder()

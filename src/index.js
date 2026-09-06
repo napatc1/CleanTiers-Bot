@@ -31,8 +31,10 @@ const {
   getQueueTesters,
   setQueueMessage,
   getQueueMessage,
+  setQueueRegion,
+  getQueueRegion,
 } = require("./queue");
-const { db, setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername, setLiveTest, clearLiveTest, logTestResult } = require("./firebase");
+const { db, setPlayerTier, getPlayer, getCooldownUntil, setCooldown, clearCooldown, setVerifiedUsername, getVerifiedUsername, getVerifiedPlatform, setLiveTest, clearLiveTest, logTestResult } = require("./firebase");
 
 const client = new Client({
   intents: [
@@ -98,6 +100,17 @@ function getRolePing(guild, gamemode) {
   return role ? `<@&${role.id}> ` : "";
 }
 
+// Warns a player if their stored region doesn't match the region a tester
+// picked for this queue session. Non-blocking — they can still join.
+async function regionMismatchWarning(discordUserId, queueRegion) {
+  if (!queueRegion) return "";
+  const username = await getVerifiedUsername(discordUserId);
+  if (!username) return "";
+  const player = await getPlayer(username);
+  if (!player || !player.region || player.region === queueRegion) return "";
+  return `\n\n\u26a0\ufe0f If you join this queue, the tester will only allow you to test on **${queueRegion}** servers.`;
+}
+
 function activeTestersBlock(queueKey) {
   const testers = getQueueTesters(queueKey);
   const active = getActiveTesting(queueKey);
@@ -115,10 +128,12 @@ function activeTestersBlock(queueKey) {
 function buildQueueEmbed(channelId, gamemode) {
   const closed = isQueueClosed(channelId);
   const count = getQueue(channelId).length;
+  const region = getQueueRegion(channelId);
   return new EmbedBuilder()
     .setTitle(`${gamemode.toUpperCase()} Queue (${count})${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
-      (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+      (region ? `**Server Region:** ${region}\n\n` : "") +
+        (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
         activeTestersBlock(channelId) +
         formatQueue(channelId)
     )
@@ -128,10 +143,12 @@ function buildQueueEmbed(channelId, gamemode) {
 function buildHighQueueEmbed(highKey, gamemode) {
   const closed = isQueueClosed(highKey);
   const count = getQueue(highKey).length;
+  const region = getQueueRegion(highKey);
   return new EmbedBuilder()
     .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${closed ? " \u2014 CLOSED" : ""}`)
     .setDescription(
-      (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+      (region ? `**Server Region:** ${region}\n\n` : "") +
+        (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
         activeTestersBlock(highKey) +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${formatQueue(highKey)}`
     )
@@ -321,13 +338,21 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
     permissionOverwrites: overwrites,
   });
 
+  const testeeUsername = await getVerifiedUsername(testeeId);
+  const testeePlatform = await getVerifiedPlatform(testeeId);
+  const testeeRecord = testeeUsername ? await getPlayer(testeeUsername) : null;
+  const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[testeePlatform] || "Unknown";
+  const testeeInfoLine = testeeUsername
+    ? `**IGN:** ${testeeUsername} (${platformLabel})\n**Region:** ${testeeRecord?.region || "Unverified/new"}\n`
+    : `**IGN:** Not verified \u2014 ask them to run \`/verify\`\n`;
+
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
     embeds: [
       new EmbedBuilder()
         .setTitle(`${gamemode.toUpperCase()} test in progress`)
         .setDescription(
-          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.`
+          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.`
         )
         .setColor(0xffd54a),
     ],
@@ -351,6 +376,8 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
     addQueueTester(interaction.channelId, interaction.user.id);
+    const queueRegion = interaction.options.getString("region", true);
+    setQueueRegion(interaction.channelId, queueRegion);
     await interaction.reply({ content: "Queue posted below.", ephemeral: true });
     const queueMsg = await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
@@ -364,15 +391,17 @@ client.on("interactionCreate", async (interaction) => {
   // /verify
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
     const username = interaction.options.getString("username", true).trim();
+    const platform = interaction.options.getString("platform", true);
     if (/[.#$\[\]]/.test(username)) {
       return interaction.reply({
         content: `"${username}" isn't a valid Minecraft username \u2014 it can't contain ".", "#", "$", "[", or "]".`,
         ephemeral: true,
       });
     }
-    await setVerifiedUsername(interaction.user.id, username);
+    await setVerifiedUsername(interaction.user.id, username, platform);
+    const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[platform];
     return interaction.reply({
-      content: `Linked your Discord account to Minecraft username **${username}**.`,
+      content: `Linked your Discord account to Minecraft username **${username}** (${platformLabel}).`,
       ephemeral: true,
     });
   }
@@ -592,6 +621,8 @@ client.on("interactionCreate", async (interaction) => {
     }
     const highKey = `${interaction.channelId}:high`;
     addQueueTester(highKey, interaction.user.id);
+    const highQueueRegion = interaction.options.getString("region", true);
+    setQueueRegion(highKey, highQueueRegion);
     await interaction.reply({ content: "High queue posted below.", ephemeral: true });
     const highQueueMsg = await interaction.channel.send({
       content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
@@ -773,8 +804,9 @@ client.on("interactionCreate", async (interaction) => {
       }
       const joined = joinQueue(interaction.channelId, interaction.user.id);
       await refreshQueueMessage(interaction, gamemode);
+      const warning = joined ? await regionMismatchWarning(interaction.user.id, getQueueRegion(interaction.channelId)) : "";
       return interaction.reply({
-        content: joined ? "You joined the queue." : "You're already in the queue.",
+        content: (joined ? "You joined the queue." : "You're already in the queue.") + warning,
         ephemeral: true,
       });
     }
@@ -904,8 +936,13 @@ client.on("interactionCreate", async (interaction) => {
 
       const joined = joinQueue(highKey, interaction.user.id);
       await refreshHighQueueMessage(interaction, gamemode);
+      const highQueueRegionSet = getQueueRegion(highKey);
+      const warning =
+        joined && highQueueRegionSet && player?.region && player.region !== highQueueRegionSet
+          ? `\n\n\u26a0\ufe0f If you join this queue, the tester will only allow you to test on **${highQueueRegionSet}** servers.`
+          : "";
       return interaction.reply({
-        content: joined ? "You joined the high queue." : "You're already in the high queue.",
+        content: (joined ? "You joined the high queue." : "You're already in the high queue.") + warning,
         ephemeral: true,
       });
     }

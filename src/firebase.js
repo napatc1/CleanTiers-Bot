@@ -90,13 +90,26 @@ async function clearCooldown(gamemode, discordUserId) {
 
 // Links a Discord account to a Minecraft username so the bot can look up
 // someone's current tiers without asking them to retype it every time.
-async function setVerifiedUsername(discordUserId, mcUsername) {
-  await db.ref(`verified/${discordUserId}`).set(mcUsername);
+async function setVerifiedUsername(discordUserId, mcUsername, platform) {
+  await db.ref(`verified/${discordUserId}`).set({
+    username: mcUsername,
+    platform: platform || "premium",
+  });
 }
 
 async function getVerifiedUsername(discordUserId) {
   const snapshot = await db.ref(`verified/${discordUserId}`).once("value");
-  return snapshot.val(); // string, or null if never verified
+  const data = snapshot.val();
+  if (!data) return null;
+  // Older entries were stored as a plain string before platform was added.
+  return typeof data === "string" ? data : data.username;
+}
+
+async function getVerifiedPlatform(discordUserId) {
+  const snapshot = await db.ref(`verified/${discordUserId}`).once("value");
+  const data = snapshot.val();
+  if (!data || typeof data === "string") return null;
+  return data.platform || null;
 }
 
 // "Live tests" lets the website show what's happening right now. Keyed by
@@ -124,6 +137,7 @@ module.exports = {
   clearCooldown,
   setVerifiedUsername,
   getVerifiedUsername,
+  getVerifiedPlatform,
   setLiveTest,
   clearLiveTest,
   logTestResult,

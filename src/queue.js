@@ -50,6 +50,18 @@ function setQueueClosed(key, closed) {
   else closedQueues.delete(key);
 }
 
+// The server region a tester picked for this queue session (e.g. "NA").
+// Used to warn players whose account region doesn't match.
+const queueRegions = new Map();
+
+function setQueueRegion(key, region) {
+  queueRegions.set(key, region);
+}
+
+function getQueueRegion(key) {
+  return queueRegions.get(key) || null;
+}
+
 // Tracks which testers are "manning" a queue right now — set as soon as
 // /postqueue is run (by whoever ran it) or someone runs /jointesting.
 // When "Next" pulls someone, every tester in this set gets access to the
@@ -123,6 +135,8 @@ module.exports = {
   getQueue,
   isQueueClosed,
   setQueueClosed,
+  setQueueRegion,
+  getQueueRegion,
   setActiveTesting,
   getActiveTesting,
   clearActiveTestingByTicket,
