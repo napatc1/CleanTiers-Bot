@@ -352,12 +352,29 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
       new EmbedBuilder()
         .setTitle(`${gamemode.toUpperCase()} test in progress`)
         .setDescription(
-          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.`
+          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
         )
         .setColor(0xffd54a),
     ],
     components: [buildTicketButtons(gamemode, testeeId)],
   });
+
+  // Safety net: auto-close after 2 hours if nobody submitted a result or
+  // manually closed it. Checks the channel still exists first, so this is
+  // a harmless no-op if the ticket was already closed normally.
+  setTimeout(async () => {
+    try {
+      const stillExists = await guild.channels.fetch(channel.id).catch(() => null);
+      if (!stillExists) return;
+      await channel
+        .send({ content: "This ticket has been open for 2 hours with no result submitted \u2014 closing it automatically." })
+        .catch(() => {});
+      await clearActiveTestingAndRefresh(guild, channel.id);
+      await channel.delete().catch((err) => console.error("Failed to auto-delete stale ticket:", err.message));
+    } catch (err) {
+      console.error("Error during ticket auto-close:", err.message);
+    }
+  }, 2 * 60 * 60 * 1000);
 
   return channel;
 }
